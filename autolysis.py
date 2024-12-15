@@ -28,8 +28,6 @@ def remove_readonly(func, path, excinfo):
     os.chmod(path, stat.S_IWRITE)
     func(path)
 
-msg = "An error occurred while cloning the branch"
-
 shutil.rmtree(repo_path, onerror=remove_readonly)
 
 # Comprehensive data exploration function to extract deep insights
