@@ -22,20 +22,6 @@ import argparse
 import requests
 import json
 import openai  # Advanced text generation library
-import stat
-for _, row in submissions.iterrows():
-    evals = []
-    msg = f"[blue]{row.id}[/blue]"  # Default message
-    try:
-        # ... existing code ...
-    except Exception as e:
-        log(f"{msg} [red]UNEXPECTED FAILURE[/red] {e}", last=True)
-        continue
-def remove_readonly(func, path, excinfo):
-    os.chmod(path, stat.S_IWRITE)
-    func(path)
-
-shutil.rmtree(repo_path, onerror=remove_readonly)
 
 # Comprehensive data exploration function to extract deep insights
 def extract_data_insights(dataset):
