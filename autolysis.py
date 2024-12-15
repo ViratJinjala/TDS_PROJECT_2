@@ -1,118 +1,143 @@
-# /// script
-# requires-python = ">=3.11"
-# dependencies = [
-#   "pandas",
-#   "seaborn",
-#   "matplotlib",
-#   "httpx",
-#   "chardet",
-#   "python-dotenv",
-# ]
-# ///
-
 import os
-import sys
 import pandas as pd
-import seaborn as sns
-import matplotlib
+import numpy as np
 import matplotlib.pyplot as plt
-import httpx
-import chardet
-from dotenv import load_dotenv
+import seaborn as sns
+import openai  # Import the openai module
 
-# Force non-interactive matplotlib backend
-matplotlib.use('Agg')
+# Install missing libraries in Colab
+!pip install pandas numpy matplotlib seaborn openai -q
 
-# Load environment variables
-load_dotenv()
+# Set up your OpenAI API key
+os.environ["OPENAI_API_KEY"] = "eyJhbGciOiJIUzI1NiJ9.eyJlbWFpbCI6IjIzZjEwMDAwNDNAZHMuc3R1ZHkuaWl0bS5hYy5pbiJ9.gPGFb0WRw-OE8Iex6mdLLthY93UZ0kVtrbQQkWgvAx0"  #OpenAI API key
 
-# Constants
-API_URL = "https://aiproxy.sanand.workers.dev/openai/v1/chat/completions"
-AIPROXY_TOKEN = os.getenv("AIPROXY_TOKEN")
+# Load dataset with multiple encoding attempts
+def load_dataset(file_name):
+    encodings_to_try = ['utf-8', 'latin1', 'ISO-8859-1', 'windows-1252']
+    for encoding in encodings_to_try:
+        try:
+            data = pd.read_csv(file_name, encoding=encoding)
+            print(f"Dataset '{file_name}' loaded successfully with encoding '{encoding}'.")
+            return data
+        except UnicodeDecodeError:
+            print(f"Encoding issue detected with {file_name} using {encoding}. Trying next encoding.")
+        except Exception as e:
+            print(f"Error loading dataset: {e}")
+            return None
+    print(f"Failed to load {file_name} with all attempted encodings.")
+    return None
 
-if not AIPROXY_TOKEN:
-    raise ValueError("API token not set. Please set AIPROXY_TOKEN in the environment.")
-
-def load_data(file_path):
-    """Load CSV data with encoding detection."""
-    try:
-        with open(file_path, 'rb') as f:
-            result = chardet.detect(f.read())
-        encoding = result['encoding']
-        return pd.read_csv(file_path, encoding=encoding)
-    except Exception as e:
-        print(f"Error loading file: {e}")
-        sys.exit(1)
-
-def analyze_data(df):
-    """Perform basic data analysis."""
-    numeric_df = df.select_dtypes(include=['number'])  # Select only numeric columns
-    analysis = {
-        'summary': df.describe(include='all').to_dict(),
-        'missing_values': df.isnull().sum().to_dict(),
-        'correlation': numeric_df.corr().to_dict()  # Compute correlation only on numeric columns
+# Basic data exploration
+def explore_data(df):
+    print("\n--- Dataset Overview ---")
+    print(df.info())
+    print("\n--- Descriptive Statistics ---")
+    print(df.describe())
+    print("\n--- First 5 Rows ---")
+    print(df.head())
+    return {
+        "info": df.info(),
+        "describe": df.describe(),
+        "columns": df.columns.tolist(),
+        "missing": df.isnull().sum().to_dict(),
     }
-    return analysis
 
-def visualize_data(df, output_dir):
-    """Generate and save visualizations."""
-    sns.set(style="whitegrid")
-    numeric_columns = df.select_dtypes(include=['number']).columns
-    for column in numeric_columns:
-        plt.figure()
-        sns.histplot(df[column].dropna(), kde=True)
-        plt.title(f'Distribution of {column}')
-        plt.savefig(os.path.join(output_dir, f'{column}_distribution.png'))
+# Visualize data
+def visualize_data(df, output_dir="charts"):
+    os.makedirs(output_dir, exist_ok=True)
+    chart_paths = []  # Initialize the list to store chart paths
+
+    # Example: Correlation Heatmap
+    plt.figure(figsize=(10, 8))
+    corr = df.corr(numeric_only=True)
+    sns.heatmap(corr, annot=True, cmap="coolwarm", fmt=".2f")
+    heatmap_path = os.path.join(output_dir, "correlation_heatmap.png")
+    plt.title("Correlation Heatmap")
+    plt.savefig(heatmap_path)
+    plt.close()
+    print(f"Saved correlation heatmap to {heatmap_path}")
+    chart_paths.append(heatmap_path)  # Add heatmap to chart_paths
+
+    # Box Plot for numerical columns
+    plt.figure(figsize=(10, 6))
+    sns.boxplot(data=df.select_dtypes(include=[np.number]))
+    plt.title("Box Plot for Numerical Features")
+    boxplot_path = os.path.join(output_dir, "box_plot.png")
+    plt.savefig(boxplot_path)
+    plt.close()
+    print(f"Saved box plot to {boxplot_path}")
+    chart_paths.append(boxplot_path)  # Add boxplot to chart_paths
+
+    # Pair Plot for selected numerical columns
+    numerical_cols = df.select_dtypes(include=[np.number]).columns[:5]  # Limit to first 5 columns
+    if len(numerical_cols) > 1:  # Only create if there are at least two numerical columns
+        pairplot = sns.pairplot(df[numerical_cols])
+        pairplot_path = os.path.join(output_dir, "pair_plot.png")
+        pairplot.savefig(pairplot_path)
         plt.close()
+        print(f"Saved pair plot to {pairplot_path}")
+        chart_paths.append(pairplot_path)  # Add pair plot to chart_paths
 
-def generate_narrative(analysis):
-    """Generate narrative using LLM."""
-    headers = {
-        'Authorization': f'Bearer {AIPROXY_TOKEN}',
-        'Content-Type': 'application/json'
-    }
-    prompt = f"Provide a detailed analysis based on the following data summary: {analysis}"
-    data = {
-        "model": "gpt-4o-mini",
-        "messages": [{"role": "user", "content": prompt}]
-    }
+    return chart_paths  # Return all chart paths
+
+# Use OpenAI LLM to analyze and narrate
+def narrate_analysis(df_summary, charts):
     try:
-        response = httpx.post(API_URL, headers=headers, json=data, timeout=30.0)
-        response.raise_for_status()
-        return response.json()['choices'][0]['message']['content']
-    except httpx.HTTPStatusError as e:
-        print(f"HTTP error occurred: {e}")
-    except httpx.RequestError as e:
-        print(f"Request error occurred: {e}")
+        prompt = (
+            f"Analyze the following dataset summary and charts:\n\n"
+            f"Summary: {df_summary}\n\n"
+            f"Charts: {charts}\n\n"
+            "Narrate a story describing the data, insights, and implications."
+        )
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[{"role": "system", "content": "You are an analyst."},
+                      {"role": "user", "content": prompt}]
+        )
+        print("\n--- Narrative ---")
+        narrative = response['choices'][0]['message']['content']
+        print(narrative)
+        return narrative
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-    return "Narrative generation failed due to an error."
+        print(f"Error with OpenAI API: {e}")
+        return None
 
+# Generate Markdown README
+def generate_readme(df_summary, narrative, charts, output_path="README.md"):
+    try:
+        with open(output_path, "w") as f:
+            f.write("# Analysis Report\n")
+            f.write("\n## Dataset Summary\n")
+            f.write(f"{df_summary}\n")
+            f.write("\n## Insights and Narrative\n")
+            f.write(f"{narrative}\n")
+            f.write("\n## Charts\n")
+            for chart in charts:
+                f.write(f"![{chart}]({chart})\n")
+        print(f"Saved README to {output_path}")
+    except Exception as e:
+        print(f"Error writing README: {e}")
+
+# Main Function
 def main():
-    import argparse
+    # File upload for Colab
+    from google.colab import files  # Import files here
+    uploaded = files.upload()
+    if not uploaded:
+        print("No file uploaded.")
+        return
 
-    parser = argparse.ArgumentParser(description="Analyze datasets and generate insights.")
-    parser.add_argument("file_path", help="Path to the dataset CSV file.")
-    parser.add_argument("-o", "--output_dir", default="output", help="Directory to save outputs.")
-    args = parser.parse_args()
+    file_name = list(uploaded.keys())[0]
+    data = load_dataset(file_name)
+    if data is None:
+        return
 
-    os.makedirs(args.output_dir, exist_ok=True)
+    df_summary = explore_data(data)
+    chart_paths = visualize_data(data)
 
-    # Load data
-    df = load_data(args.file_path)
+    narrative = narrate_analysis(df_summary, chart_paths)
+    generate_readme(df_summary, narrative, chart_paths)
 
-    # Analyze data
-    analysis = analyze_data(df)
-
-    # Visualize data
-    visualize_data(df, args.output_dir)
-
-    # Generate narrative
-    narrative = generate_narrative(analysis)
-
-    # Save narrative
-    with open(os.path.join(args.output_dir, 'README.md'), 'w') as f:
-        f.write(narrative)
-
+# Run the script
 if __name__ == "__main__":
     main()
