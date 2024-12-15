@@ -22,6 +22,13 @@ import argparse
 import requests
 import json
 import openai  # Advanced text generation library
+import stat
+
+def remove_readonly(func, path, excinfo):
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+shutil.rmtree(repo_path, onerror=remove_readonly)
 
 # Comprehensive data exploration function to extract deep insights
 def extract_data_insights(dataset):
