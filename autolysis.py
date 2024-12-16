@@ -1,3 +1,18 @@
+# /// script
+# requires-python = ">=3.9"
+# dependencies = [
+#   "pandas",
+#   "seaborn",
+#   "matplotlib",
+#   "numpy",
+#   "scipy",
+#   "openai",
+#   "scikit-learn",
+#   "requests",
+#   "ipykernel",  # Required for running in Jupyter environments
+# ]
+# ///
+
 import os
 import pandas as pd
 import numpy as np
@@ -6,12 +21,24 @@ import matplotlib.pyplot as plt
 import argparse
 import requests
 import json
-import openai  # Make sure you install this library: pip install openai
+import openai  # Ensure this library is installed: pip install openai
 
-# Function to analyze the data (basic summary stats, missing values, correlation matrix)
+# ---------------------------- Helper Functions ---------------------------- #
+
 def analyze_data(df):
-    print("Analyzing the data...")  # Debugging line
-    # Summary statistics for numerical columns
+    """
+    Perform a comprehensive analysis of the dataset, including:
+    - Summary statistics for numerical columns
+    - Missing value counts
+    - Correlation matrix for numeric data
+
+    Args:
+        df (pd.DataFrame): The dataset to analyze.
+
+    Returns:
+        tuple: Summary statistics, missing value counts, correlation matrix.
+    """
+    print("Analyzing the dataset...")
     summary_stats = df.describe()
 
     # Check for missing values
@@ -26,71 +53,109 @@ def analyze_data(df):
     print("Data analysis complete.")  # Debugging line
     return summary_stats, missing_values, corr_matrix
 
-
-# Function to detect outliers using the IQR method
 def detect_outliers(df):
-    print("Detecting outliers...")  # Debugging line
-    # Select only numeric columns
-    df_numeric = df.select_dtypes(include=[np.number])
+    """
+    Detect outliers in numerical columns using the IQR method.
 
-    # Apply the IQR method to find outliers in the numeric columns
+    Args:
+        df (pd.DataFrame): The dataset to analyze.
+
+    Returns:
+        pd.Series: Count of outliers for each numeric column.
+    """
+    print("Detecting outliers...")
+    df_numeric = df.select_dtypes(include=[np.number])  # Numeric columns only
     Q1 = df_numeric.quantile(0.25)
     Q3 = df_numeric.quantile(0.75)
     IQR = Q3 - Q1
     outliers = ((df_numeric < (Q1 - 1.5 * IQR)) | (df_numeric > (Q3 + 1.5 * IQR))).sum()
-
-    print("Outliers detection complete.")  # Debugging line
+    print("Outlier detection complete.")
     return outliers
 
 
-# Function to generate visualizations (correlation heatmap, outliers plot, and distribution plot)
 def visualize_data(corr_matrix, outliers, df, output_dir):
-    print("Generating visualizations...")  # Debugging line
-    # Generate a heatmap for the correlation matrix
-    plt.figure(figsize=(10, 8))
-    sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
-    plt.title('Correlation Matrix')
-    heatmap_file = os.path.join(output_dir, 'correlation_matrix.png')
-    plt.savefig(heatmap_file)
-    plt.close()
+    """
+    Generate visualizations for the analysis, including:
+    - Correlation heatmap
+    - Outlier counts
+    - Distribution plot of the first numeric column
+    - Boxplot for outlier analysis
 
-    # Check if there are outliers to plot
+    Args:
+        corr_matrix (pd.DataFrame): Correlation matrix.
+        outliers (pd.Series): Outlier counts per column.
+        df (pd.DataFrame): The dataset.
+        output_dir (str): Directory to save visualizations.
+
+    Returns:
+        tuple: File paths of saved visualizations (heatmap, outliers, distribution, boxplot).
+    """
+    print("Generating visualizations...")
+
+    # Correlation heatmap
+    heatmap_file = os.path.join(output_dir, 'correlation_matrix.png')
+    if not corr_matrix.empty:
+        plt.figure(figsize=(10, 8))
+        sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
+        plt.title('Correlation Matrix')
+        plt.savefig(heatmap_file)
+        plt.close()
+    else:
+        heatmap_file = None
+
+    # Outliers bar chart
+    outliers_file = None
     if not outliers.empty and outliers.sum() > 0:
-        # Plot the outliers
+        outliers_file = os.path.join(output_dir, 'outliers.png')
         plt.figure(figsize=(10, 6))
         outliers.plot(kind='bar', color='red')
         plt.title('Outliers Detection')
         plt.xlabel('Columns')
         plt.ylabel('Number of Outliers')
-        outliers_file = os.path.join(output_dir, 'outliers.png')
         plt.savefig(outliers_file)
         plt.close()
-    else:
-        print("No outliers detected to visualize.")
-        outliers_file = None  # No file created for outliers
 
-    # Generate a distribution plot for the first numeric column
+    # Distribution plot for the first numeric column
+    dist_plot_file = None
     numeric_columns = df.select_dtypes(include=[np.number]).columns
     if len(numeric_columns) > 0:
-        first_numeric_column = numeric_columns[0]  # Get the first numeric column
+        dist_plot_file = os.path.join(output_dir, 'distribution.png')
         plt.figure(figsize=(10, 6))
-        sns.histplot(df[first_numeric_column], kde=True, color='blue', bins=30)
-        plt.title(f'Distribution')
-        dist_plot_file = os.path.join(output_dir, f'distribution_.png')
+        sns.histplot(df[numeric_columns[0]], kde=True, color='blue', bins=30)
+        plt.title(f'Distribution of {numeric_columns[0]}')
         plt.savefig(dist_plot_file)
         plt.close()
-    else:
-        dist_plot_file = None  # No numeric columns to plot
 
-    print("Visualizations generated.")  # Debugging line
-    return heatmap_file, outliers_file, dist_plot_file
+    # Boxplot for outlier analysis
+    boxplot_file = None
+    if len(numeric_columns) > 0:
+        boxplot_file = os.path.join(output_dir, 'boxplot.png')
+        plt.figure(figsize=(10, 6))
+        sns.boxplot(data=df[numeric_columns], orient="h", palette="Set2")
+        plt.title('Boxplot of Numeric Columns')
+        plt.savefig(boxplot_file)
+        plt.close()
+
+    print("Visualizations generated.")
+    return heatmap_file, outliers_file, dist_plot_file, boxplot_file
 
 
-# Function to create the README.md with a narrative and visualizations
-def create_readme(summary_stats, missing_values, corr_matrix, outliers, output_dir):
-    print("Creating README file...")  # Debugging line
-    
-    # Write the analysis report to a markdown file
+def create_readme(summary_stats, missing_values, corr_matrix, outliers, output_dir, visualizations):
+    """
+    Generate a README.md file summarizing the analysis.
+
+    Args:
+        summary_stats (pd.DataFrame): Summary statistics.
+        missing_values (pd.Series): Missing value counts.
+        corr_matrix (pd.DataFrame): Correlation matrix.
+        outliers (pd.Series): Outlier counts.
+        output_dir (str): Directory to save the README.
+        visualizations (dict): Paths to visualization files.
+
+    Returns:
+        str: Path to the generated README.md file.
+    """
+    print("Creating README file...")
     readme_file = os.path.join(output_dir, 'README.md')
     try:
         with open(readme_file, 'w') as f:
@@ -175,130 +240,91 @@ def create_readme(summary_stats, missing_values, corr_matrix, outliers, output_d
         return None
 
 
-
-
-# Function to generate a detailed story using the new OpenAI API through the proxy
 def question_llm(prompt, context):
-    print("Generating story using LLM...")  # Debugging line
-    try:
-        # Get the AIPROXY_TOKEN from the environment variable
-        token = os.environ["AIPROXY_TOKEN"]
+    """
+    Generate a narrative story using an LLM API through a custom proxy.
 
-        # Set the custom API base URL for the proxy
+    Args:
+        prompt (str): Specific prompt for the LLM.
+        context (str): Context to guide the LLM.
+
+    Returns:
+        str: Generated narrative.
+    """
+    print("Generating story using LLM...")
+    try:
+        token = os.environ.get("AIPROXY_TOKEN", "")
         api_url = "https://aiproxy.sanand.workers.dev/openai/v1/chat/completions"
 
-        # Construct the full prompt
-        full_prompt = f"""
-        Based on the following data analysis, please generate a creative and engaging story. The story should include multiple paragraphs, a clear structure with an introduction, body, and conclusion, and should feel like a well-rounded narrative.
-
-        Context:
-        {context}
-
-        Data Analysis Prompt:
-        {prompt}
-
-        The story should be elaborate and cover the following:
-        - An introduction to set the context.
-        - A detailed body that expands on the data points and explores their significance.
-        - A conclusion that wraps up the analysis and presents any potential outcomes or lessons.
-        - Use transitions to connect ideas and keep the narrative flowing smoothly.
-        - Format the story with clear paragraphs and structure.
-        """
-
-        # Prepare headers
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {token}"
-        }
-
-        # Prepare the body with the model and prompt
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
         data = {
-            "model": "gpt-4o-mini",  # Specific model for proxy
+            "model": "gpt-4o-mini",
             "messages": [
                 {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": full_prompt}
+                {"role": "user", "content": f"{context}\n\n{prompt}"}
             ],
             "max_tokens": 1000,
             "temperature": 0.7
         }
 
-        # Send the POST request to the proxy
         response = requests.post(api_url, headers=headers, data=json.dumps(data))
-
-        # Check for successful response
         if response.status_code == 200:
-            # Extract the story from the response
-            story = response.json()['choices'][0]['message']['content'].strip()
-            print("Story generated.")  # Debugging line
-            return story
+            return response.json()['choices'][0]['message']['content'].strip()
         else:
-            print(f"Error with request: {response.status_code} - {response.text}")
             return "Failed to generate story."
-
     except Exception as e:
-        print(f"Error: {e}")
-        return "Failed to generate story."
+        return f"Error: {e}"
 
 
+# ---------------------------- Main Execution ---------------------------- #
 
-# Main function that integrates all the steps
 def main(csv_file):
-    print("Starting the analysis...")  # Debugging line
+    """
+    Main function to integrate data analysis, visualization, and documentation.
 
-    # Set the API token as an environment variable
-  
-    # Try reading the CSV file with 'ISO-8859-1' encoding to handle special characters
+    Args:
+        csv_file (str): Path to the dataset CSV file.
+    """
+    print("Starting the analysis...")
+
     try:
         df = pd.read_csv(csv_file, encoding='ISO-8859-1')
-        print("Dataset loaded successfully!")  # Debugging line
-    except UnicodeDecodeError as e:
-        print(f"Error reading file: {e}")
+        print("Dataset loaded successfully!")
+    except Exception as e:
+        print(f"Error loading dataset: {e}")
         return
 
     summary_stats, missing_values, corr_matrix = analyze_data(df)
-
-    # Debugging print
-    print("Summary Stats:")
-    print(summary_stats)
-
     outliers = detect_outliers(df)
-
-    # Debugging print
-    print("Outliers detected:")
-    print(outliers)
 
     output_dir = "."
     os.makedirs(output_dir, exist_ok=True)
 
-    # Visualize the data and check output paths
-    heatmap_file, outliers_file, dist_plot_file = visualize_data(corr_matrix, outliers, df, output_dir)
+    heatmap_file, outliers_file, dist_plot_file, boxplot_file = visualize_data(corr_matrix, outliers, df, output_dir)
 
-    print("Visualizations saved.")
+    story = question_llm(
+        "Generate a creative and engaging story from the data analysis.",
+        context=f"Dataset Analysis:\nSummary Statistics:\n{summary_stats}\n\nMissing Values:\n{missing_values}\n\nCorrelation Matrix:\n{corr_matrix}\n\nOutliers:\n{outliers}"
+    )
 
-    # Generate the story using the LLM
-    story = question_llm("Generate a nice and creative story from the analysis", 
-                         context=f"Dataset Analysis:\nSummary Statistics:\n{summary_stats}\n\nMissing Values:\n{missing_values}\n\nCorrelation Matrix:\n{corr_matrix}\n\nOutliers:\n{outliers}")
+    visualizations = {
+        "heatmap": heatmap_file,
+        "outliers": outliers_file,
+        "distribution": dist_plot_file,
+        "boxplot": boxplot_file
+    }
 
-    # Create the README file with the analysis and the story
-    readme_file = create_readme(summary_stats, missing_values, corr_matrix, outliers, output_dir)
+    readme_file = create_readme(summary_stats, missing_values, corr_matrix, outliers, output_dir, visualizations)
     if readme_file:
-        try:
-            # Append the story to the README.md file
-            with open(readme_file, 'a') as f:
-                f.write("## Story\n")
-                f.write(f"{story}\n")
+        with open(readme_file, 'a') as f:
+            f.write("\n## Story\n")
+            f.write(story)
 
-            print(f"Analysis complete! Results saved in '{output_dir}' directory.")
-            print(f"README file: {readme_file}")
-            print(f"Visualizations: {heatmap_file}, {outliers_file}, {dist_plot_file}")
-        except Exception as e:
-            print(f"Error appending story to README.md: {e}")
-    else:
-        print("Error generating the README.md file.")
+        print(f"Analysis complete! Results saved in '{output_dir}'.\nREADME file, visualizations, and analysis results are available for review.")
 
 if __name__ == "__main__":
     import sys
     if len(sys.argv) < 2:
-        print("Usage: uv run autolysis.py <dataset_path>")
+        print("Usage: python script.py <dataset_path>")
         sys.exit(1)
     main(sys.argv[1])
